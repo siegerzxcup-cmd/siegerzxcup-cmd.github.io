@@ -146,8 +146,8 @@
         function updateUI() {
             // CSモードかつ10分未満、かつ0秒より大きい場合は文字を隠す
             if (isCSMode && timeLeft < 600 && timeLeft > 0) {
-                display.textContent = "Under 10min";
-                display.style.fontSize = "6vw"; // 長い文字列用にサイズを調整
+                display.textContent = "-10min";
+                display.style.fontSize = "10vw"; // 長い文字列用にサイズを調整
             } else {
                 display.textContent = formatTime(timeLeft);
                 display.style.fontSize = "10vw"; // 通常サイズ
