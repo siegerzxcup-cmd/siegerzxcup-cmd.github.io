@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>40分カウントダウンタイマー - CS Edition</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Press+Start+2P&display=swap" rel="stylesheet">
+
+    <style>
+        /* 基本スタイル */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.5s, color 0.5s;
+            overflow: hidden;
+            font-family: 'Audiowide', cursive;
+        }
+
+        /* 状態別カラー */
+        body.state-default { background-color: #00FF00; color: #000000; }
+        body.state-warning { background-color: #FFFF00; color: #000000; }
+        body.state-danger  { background-color: #FF0000; color: #000000; }
+        body.state-over    { background-color: #000000; color: #FF0000; }
+
+        /* タイマー表示エリア: Press Start 2P を適用 */
+        #timer-display {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 10vw; /* 長い文字(Under 10min)が入るため少し小さめに設定 */
+            line-height: 1.5;
+            text-align: center;
+            user-select: none;
+            display: inline-block;
+            transform: scaleY(1.2); /* 縦方向に120%引き伸ばし */
+            margin-bottom: 40px;
+            white-space: nowrap;
+        }
+
+        /* ボタン配置コンテナ */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .row {
+            display: flex;
+            gap: 30px;
+        }
+
+        /* ボタン共通スタイル */
+        button {
+            padding: 20px 40px;
+            font-size: 1.8rem;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: 'Audiowide', cursive;
+            border: 4px solid currentColor;
+            background: rgba(255, 255, 255, 0.2);
+            color: inherit;
+            border-radius: 15px;
+            transition: all 0.1s;
+        }
+
+        /* CS MODE ボタン: 特別に大きく、目立つように */
+        #cs-start-btn {
+            width: 100%;
+            padding: 30px;
+            font-size: 2.2rem;
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        button:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="state-default">
+
+    <div id="timer-display">40:00</div>
+
+    <div class="controls">
+        <div class="row">
+            <button id="pause-btn">START</button>
+            <button id="reset-btn">RESET</button>
+        </div>
+        <button id="cs-start-btn">CS MODE START</button>
+    </div>
+
+    <audio id="snd-30" src="last30min.wav"></audio>
+    <audio id="snd-20" src="last20min.wav"></audio>
+    <audio id="snd-10" src="last10min.wav"></audio>
+    <audio id="snd-over" src="timeover.wav"></audio>
+
+    <script>
+        // --- 設定値と管理用変数 ---
+        const INITIAL_TIME = 40 * 60;
+        let timeLeft = INITIAL_TIME;
+        let timerInterval = null;
+        let isRunning = false;
+        let isCSMode = false; // CSモードかどうかを判定するフラグ
+
+        // 音声再生済みフラグ
+        let playedFlags = { m30: false, m20: false, m10: false, over: false };
+
+        const display = document.getElementById('timer-display');
+        const pauseBtn = document.getElementById('pause-btn');
+        const csBtn = document.getElementById('cs-start-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const body = document.body;
+
+        /**
+         * 秒数を MM:SS 形式に変換
+         */
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        /**
+         * 音声を2回再生
+         */
+        function playSoundTwice(audioId) {
+            const audio = document.getElementById(audioId);
+            if (!audio) return;
+            let count = 0;
+            const playFunc = () => {
+                count++;
+                audio.currentTime = 0;
+                audio.play().catch(e => console.log("Audio blocked"));
+                if (count < 2) audio.onended = playFunc;
+                else audio.onended = null;
+            };
+            playFunc();
+        }
+
+        /**
+         * UIの更新（タイマー文字、色、音声判定）
+         */
+        function updateUI() {
+            // CSモードかつ10分未満、かつ0秒より大きい場合は文字を隠す
+            if (isCSMode && timeLeft < 600 && timeLeft > 0) {
+                display.textContent = "Under 10min";
+                display.style.fontSize = "6vw"; // 長い文字列用にサイズを調整
+            } else {
+                display.textContent = formatTime(timeLeft);
+                display.style.fontSize = "10vw"; // 通常サイズ
+            }
+
+            // 状態に応じた音声と背景色の変更
+            if (timeLeft < 1800 && !playedFlags.m30) {
+                playSoundTwice('snd-30');
+                playedFlags.m30 = true;
+            }
+            if (timeLeft < 1200) {
+                body.className = 'state-warning';
+                if (!playedFlags.m20) { playSoundTwice('snd-20'); playedFlags.m20 = true; }
+            }
+            if (timeLeft < 600) {
+                body.className = 'state-danger';
+                if (!playedFlags.m10) { playSoundTwice('snd-10'); playedFlags.m10 = true; }
+            }
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                body.className = 'state-over';
+                if (!playedFlags.over) {
+                    playSoundTwice('snd-over');
+                    playedFlags.over = true;
+                }
+                // 終了時は通常のボタン表示に戻す
+                pauseBtn.textContent = 'START';
+                csBtn.textContent = 'CS MODE START';
+                isRunning = false;
+            }
+        }
+
+        /**
+         * タイマーの開始・停止（通常モード用）
+         */
+        function toggleTimer() {
+            if (isRunning) {
+                pauseTimer();
+            } else {
+                isCSMode = false; // 通常モードとして開始
+                startTimer();
+            }
+        }
+
+        /**
+         * タイマーの開始・停止（CSモード用）
+         */
+        function toggleCSMode() {
+            if (isRunning && isCSMode) {
+                pauseTimer();
+            } else {
+                isCSMode = true; // CSモードとして開始
+                startTimer();
+            }
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (timeLeft > 0) {
+                    timeLeft--;
+                    updateUI();
+                }
+            }, 1000);
+            isRunning = true;
+            updateButtonLabels();
+        }
+
+        function pauseTimer() {
+            clearInterval(timerInterval);
+            isRunning = false;
+            updateButtonLabels();
+        }
+
+        /**
+         * ボタンのテキストを現在の状態（一時停止中か実行中か）に合わせて更新
+         */
+        function updateButtonLabels() {
+            if (isRunning) {
+                if (isCSMode) {
+                    pauseBtn.textContent = 'PAUSE';
+                    csBtn.textContent = 'CS MODE PAUSE';
+                } else {
+                    pauseBtn.textContent = 'PAUSE';
+                    csBtn.textContent = 'CS MODE START';
+                }
+            } else {
+                pauseBtn.textContent = 'START';
+                csBtn.textContent = 'CS MODE START';
+            }
+        }
+
+        /**
+         * リセット
+         */
+        function resetTimer() {
+            clearInterval(timerInterval);
+            isRunning = false;
+            isCSMode = false;
+            timeLeft = INITIAL_TIME;
+            playedFlags = { m30: false, m20: false, m10: false, over: false };
+            body.className = 'state-default';
+            updateButtonLabels();
+            updateUI();
+        }
+
+        // イベントリスナー
+        pauseBtn.addEventListener('click', toggleTimer);
+        csBtn.addEventListener('click', toggleCSMode);
+        resetBtn.addEventListener('click', resetTimer);
+
+    </script>
+</body>
+</html>
